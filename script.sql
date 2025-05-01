@@ -289,7 +289,9 @@ dwh_delta_insert_result AS ( -- делаем расчёт витрины по н
       FROM (
             SELECT  -- в этой выборке объединяем две внутренние выборки по расчёту столбцов витрины и применяем оконную функцию для определения самой популярной категории товаров
                   *,
-                  RANK() OVER(PARTITION BY T2.customer_id ORDER BY T2.count_order DESC) AS rank_count_product 
+                  RANK() OVER(PARTITION BY T2.customer_id ORDER BY T2.count_order DESC) AS rank_count_product,
+                  RANK() OVER(PARTITION BY T2.customer_id ORDER BY T2.craftsman_id DESC) AS rank_craftsman_id
+                  
             FROM (                        							
 			      SELECT -- в этой выборке делаем расчёт по большинству столбцов, так как все они требуют одной и той же группировки, кроме столбца с самой популярной категорией товаров. Для этого столбца сделаем отдельную выборку с другой группировкой и выполним JOIN
                         T1.customer_id AS customer_id,
@@ -310,7 +312,12 @@ dwh_delta_insert_result AS ( -- делаем расчёт витрины по н
                         T1.report_period AS report_period
                   FROM dwh_delta AS T1
                   WHERE T1.exist_customer_id IS NULL
-                  GROUP BY T1.customer_id, T1.customer_name, T1.customer_address, T1.customer_birthday, T1.customer_email, T1.report_period) AS T2 
+                  GROUP BY T1.customer_id,
+                           T1.customer_name, 
+                           T1.customer_address, 
+                           T1.customer_birthday, 
+                           T1.customer_email, 
+                           T1.report_period) AS T2 
                   INNER JOIN (
                               SELECT  -- Эта выборка поможет определить самый популярный
                                     dd.customer_id AS customer_id_for_product_type, 
@@ -330,6 +337,7 @@ dwh_delta_insert_result AS ( -- делаем расчёт витрины по н
 							           dd.craftsman_id
 							  ORDER BY count_craftsman DESC) AS T5 ON T2.customer_id = T5.customer_id_for_craftsman) AS T4 
 				 WHERE T4.rank_count_product = 1
+                 AND T4.rank_craftsman_id = 1
 				 ORDER BY report_period
 ),
 dwh_delta_update_result AS ( -- делаем перерасчёт для существующих записей витринs, так как данные обновились за отчётные периоды. Логика похожа на insert, но нужно достать конкретные данные из DWH
@@ -355,7 +363,8 @@ dwh_delta_update_result AS ( -- делаем перерасчёт для сущ�
      FROM (
            SELECT     -- в этой выборке объединяем две внутренние выборки по расчёту столбцов витрины и применяем оконную функцию для определения самой популярной категории товаров
                  *,
-                 RANK() OVER(PARTITION BY T2.customer_id ORDER BY count_product DESC) AS rank_count_product 
+                 RANK() OVER(PARTITION BY T2.customer_id ORDER BY count_product DESC) AS rank_count_product,
+                 RANK() OVER(PARTITION BY T2.customer_id ORDER BY T2.craftsman_id DESC) AS rank_craftsman_id
             FROM (
                    SELECT -- в этой выборке делаем расчёт по большинству столбцов, так как все они требуют одной и той же группировки, 
                                    -- кроме столбца с самой популярной категорией товаров. Для этого столбца сделаем отдельную выборку с другой группировкой и выполним JOIN
@@ -395,7 +404,12 @@ dwh_delta_update_result AS ( -- делаем перерасчёт для сущ�
                           INNER JOIN dwh.d_customer dcs ON fo.customer_id = dcs.customer_id 
                           INNER JOIN dwh.d_product dp ON fo.product_id = dp.product_id
                           INNER JOIN dwh_update_delta ud ON fo.customer_id = ud.customer_id) AS T1
-                          GROUP BY T1.customer_id, T1.customer_name, T1.customer_address, T1.customer_birthday, T1.customer_email, T1.report_period) AS T2 
+                          GROUP BY T1.customer_id,
+                                   T1.customer_name, 
+                                   T1.customer_address, 
+                                   T1.customer_birthday, 
+                                   T1.customer_email,
+                                   T1.report_period) AS T2 
                           INNER JOIN (
                                       SELECT  -- Эта выборка поможет определить самый популярный товар у мастера. Эта выборка не делается в предыдущем запросе, так как нужна другая группировка. Для данных этой выборки можно применить оконную функцию, которая и покажет самую популярную категорию товаров у мастера
                                       		dd.customer_id AS customer_id_for_product_type, 
@@ -415,6 +429,7 @@ dwh_delta_update_result AS ( -- делаем перерасчёт для сущ�
 								               dd.craftsman_id
 								      ORDER BY count_craftsman DESC) AS T5 ON T2.customer_id = T5.customer_id_for_craftsman) AS T4
 						  WHERE T4.rank_count_product = 1
+                          AND T4.rank_craftsman_id = 1
 						  ORDER BY report_period),
 						  
 insert_delta AS ( -- выполняем insert новых расчитанных данных для витрины 
